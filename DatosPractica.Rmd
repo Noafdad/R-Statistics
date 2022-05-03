@@ -1,0 +1,1297 @@
+---
+title: "PracticaFinal"
+author: "Noelia Fernández Pérez"
+date: '2022-02-12'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F)
+set.seed(1)
+```
+
+```{r}
+library(markdown)
+library(readxl)
+library(dplyr)
+library(knitr)
+library(markdown)
+library(ggplot2)
+library(glue)
+library(GGally)
+library(gmodels)
+library(compareGroups)
+library(psych)
+library(MASS)
+library(lmtest)
+```
+
+
+```{r}
+datosPractica <- read_excel("DatosPractica.xlsx")
+```
+
+
+
+
+##### Se pretende identificar ineficiencias en el proceso de venta o factores internos y externos que pueden estar impactando el rendimiento de las mismas de una empresa de dispositivos electrónicos para las franquicias de todo el país. 
+
+##### Para el desarrollo de este estudio se sugiere seguir las siguientes instrucciones: 
+
+#####  1. Análisis descriptivo. Estudiar la distribución de las variables, así como detectar posibles valores atípicos o relaciones 
+
+#####  2. Análisis del Comportamiento de las Ventas y Variables que le Afectan 
+
+#####  3. Realizar una tabla de contingencia entre Ventas y Número de empleados, una vez categorizadas ambas variables, para número de empleados, por ejemplo, la utilizada a nivel Europeo, la cual divide a las empresas en Microempresas (1-9 trabajadores), Pequeña empresa (10-49 trabajadores), Mediana empresa (50-249 trabajadores) y Gran empresa (250 y más trabajadores)). 
+
+#####  4. Comparar las ventas entre Madrid y Barcelona. 
+
+#####  5. Presentación del modelo de predicción de las ventas para el siguiente año y describirla adecuadamente. 
+
+
+
+
+
+```{r}
+str(datosPractica) 
+```
+
+
+
+**El fichero nos vuelca 4403 registros distribuidos en 18 categorías.**
+
+**Observando los datos, considero que es necesario recodificar alguna variable; para ello creo un nuevo**
+**dataframe con el nombre “practica”, aunque antes hago las siguientes modificaciones:**
+
+  
+
+  - Simplifico la variable Provincias en 6 grupos, atendiendo al tamaño de su población, de la siguiente manera:
+
+            GRUPO 1 ( Hasta  99.999h ) 
+            
+            GRUPO 2 ( 100.000h - 299.999h) 
+            
+            GRUPO 3 ( 300.000h - 599.999h) 
+            
+            GRUPO 4 ( 600.000h - 1.499.999h) 
+            
+            GRUPO 5 ( 1.500.000 - 2999.999 )- Barcelona 
+            
+            GRUPO 6 ( +  3.000.000h) - Madrid 
+
+   - Variable REGISTRO: no aporta valor al estudio, no la tengo en cuenta. 
+
+   - Variable estp: añadír SI, si tiene centros en otra provincia y NO, si no los tiene. 
+
+   - Variable grupo: no tengo información, por lo tanto prescindo de ella. 
+
+   - Variable fju: no tengo información, porlo tanto prescindo de ella. 
+
+   - Renombro las columnas PRODUCTIVIDAD y NÚMERO DE EMPLEADOS
+     
+
+
+
+```{r}
+datosProvincias <- read_excel("DatosProvincias.xlsx")
+```
+
+
+```{r}
+datos_join <- datosPractica |> 
+  left_join(datosProvincias, by = "PROVINCIA") |> 
+  dplyr::select(-PROVINCIA)
+```
+
+
+
+```{r}
+datos_org <- datos_join |> 
+  mutate(
+    estp = factor(estp, levels = 0:1, labels = c("No", "Si")),
+    GRUPOS_PROVINCIAS = factor(GRUPOS_PROVINCIAS)
+  ) |> 
+  dplyr::select( -c(REGISTRO, grupo, fju))
+datos_org
+```
+
+
+```{r}
+practica <- 
+  rename(datos_org, Pdtvidad = PRODUCTIVIDAD, NºEmp = `NÚMERO DE EMPLEADOS`)
+practica
+```
+
+```{r}
+summary(datos_org) 
+```
+
+
+
+
+#####  **1.	Análisis descriptivo. Estudiar la distribución de las variables, así como detectar posibles valores atípicos o relaciones.**
+
+A través de ggpairs podemos calcular las correlaciones entre las variables y, al mismo tiempo, producir todos los gráficos entre las variables y gráficos de distribución de densidad de cada variable, permite descubrir la colinealidad entre covariables.
+
+
+
+```{r, fig.width=12, fig.height=6}
+ggpairs (practica, 1:13)
+```
+
+
+
+
+
+Del mismo modo, comprobamos en conjunto la normalidad de las variables numéricas, aplicando el Shapiro-test.
+
+
+```{r}
+normalidad <- 
+sapply ((dplyr::select ( practica, -GRUPOS_PROVINCIAS, - estp )), shapiro.test)
+normalidad
+```
+
+Comprobamos que en todas ellas el p-valor es <  0.05, por lo que no siguen una distribución normal, con un nivel de confianza del 95%.
+
+
+Lo siguiente que haremos será analizar individualmente las variables, para discernir las posibles relaciones entre ellas.
+
+
+**_1.- Variable Rentabieco_** Hace referencia a la Rentabilidad Económica de cada franquicia, conocida como ROA; se trata de la relación entre el beneficio bruto (antes de impuestos) y el activo total. Cuanto mayor sea este ratio, mejor, porque indicará que se requieren pocos activos para lograr un beneficio alto.
+
+
+```{r}
+summary(practica$rentabieco)
+```
+
+En este caso observamos como al ser la Media < Mediana la ROA presenta una distribución asimétrica negativa.
+
+Vemos como hay tiendas que obtienen rentabilidad positva de más de 48 puntos y otras, sin embargo, arrojan valores negativos, situándose el mínimo en -179 puntos (En estos casos, estas tiendas generan pérdidas, deben restructurarse, reducir gastos o incluso abandonar la actividad.) La media arroja un valor de 1.77. Se puede considerar una media positiva, en conjunto, al superar el valor de 1.
+
+Cuando el ROE es inferior al ROA, esto indica que el coste medio de la deuda es superior a la rentabilidad económica.
+
+
+```{r}
+psych::describe(practica$rentabieco)
+```
+
+
+La curtosis tiene un valor de 38.89. Es mucho mayor que cero, por lo que la distribución es leptocúrtica, con alta concentración de valores entorno a la media.
+
+
+```{r}
+hist(x = practica$rentabieco, main = "Histograma de ROA", xlab = "rentabieco", ylab = "Frecuencia")
+```
+
+
+
+El 50% de las franquicias están dentro de un intervalo entre el 0.12 y el 4,82 de rentabilidad. Visualmente confirmamos que estamos ante una distribución con asimetría negativa.
+Este indicador ayuda a conocer si tu empresa es rentable en relación con los activos totales. Para poder afirmar esta rentabilidad el ROA debe ser mayor de 5%.
+
+
+**_2.- Variable Rentabifin_** Se refiere a la Rentabilidad financiera, conocida como ROE, y mide la relación entre el beneficio neto y los fondos propios. 
+
+
+```{r}
+summary(practica$rentabifin)
+```
+
+```{r}
+hist(practica$rentabifin, main = "Histograma de ROE", xlab = "rentabifin", ylab = "Frecuencia")
+```
+
+
+La mayor parte de las franquicias están concentradas en torno a la media de 10.67 puntos, la rentabilidad financiera de la mayoría de las tiendas se concentran en ese valor. Junto a ello vemos que exiten valores atípicos a cada lado.
+
+Comprobamos nuevamente que dichos valores no siguen una distribución normal.
+
+
+```{r}
+practica |> 
+  ggplot(aes(x = rentabieco, y = rentabifin))+
+    geom_boxplot(color = 12,
+                 outlier.colour = 2)+
+  ggtitle ("Relación entre rentabieco - rentabifin")
+```
+
+
+
+Vamos a ver la correlación entre estas dos primeras variables, utilizando la correlación de Spearman, puesto que no siguen una distribución normal.
+
+
+```{r}
+cor.test(practica$rentabieco, practica$rentabifin, method = "spearman")
+```
+
+En el ggpairs del inicio el resultado de la correlación entre ambas variables era calculado por el método Pearson.
+
+
+```{r}
+cor_coef = cor(practica$rentabieco, practica$rentabifin, method = "spearman")
+plot(practica$rentabieco, practica$rentabifin, xlab = "rentabieco", ylab = "rentabifin")
+text(40, 500, glue::glue ("r = {round (cor_coef, 2)}"))
+```
+
+ROA = 1.77 ROE = 10.671 Como el ROE > ROA, el apalancamiento es positivo, parte del activo se ha financiado con deuda, por lo que ha crecido la rentabilidad financiera. Vemos que existe correlación positiva débil entre ambas variables, puesto que el rho es ligeramente superior a 0.
+
+ROA y ROE están muy relacionadas, una contiene a la otra, por lo que ya vimos en sus propias definiciones.
+Por eso podremos no tener en cuenta a una de ellas, y evitar así que distorsiene la predicción.
+El ROE no tiene en cuenta el ratio de endeudamiento, por ello el ROA nos aporta más valor, y será con el que valoraremos quedarnos.
+
+
+
+**_3.- Variable End_** Mide el endeudamiento de las franquicias. Se trata de un ratio entre el Pasivo de la empresa y su Patrimonio Neto.A través de él se puede saber qué tan dependiente está la empresa de la financiación ajena.
+
+
+```{r}
+summary(practica$endp)
+```
+
+```{r}
+hist(practica$endp, main = "Histograma de Endeudamiento", xlab = "endp", ylab = "Frecuencia")
+```
+
+
+Más del 50% de las franquicias que se endeudan entre 61mill y 93mill €, mientras que otro 25% asume una deuda mayor. El endeudamiento sigue una distribución asimetríca negativa, con colas menos anchas que la normal.
+
+
+
+
+**_4.- Variable Liq_** Hace referencia a la liquidez de las franquicias. La liquidez es una medida fundamental consecuencia de la rentabilidad y la salud financiera de una empresa; es un indicador clave para valorar si las franquicias generan valor, ya sea por el alto valor añadido de su producto o servicio, o por su eficiencia productiva. Es de las mejores medidas para saber si las cosas se están haciendo bien o, por el contrario, es necesario mejorarlas.
+
+
+```{r}
+summary(practica$liq)
+```
+
+```{r}
+hist(practica$liq, main = "Histograma de liquidez", xlab = "liq", ylab = "Frecuencia")
+```
+
+
+La liquidez presenta una clara asimetría positiva. Vemos como está concentrada entre el 0.94 y 1.54 para más del 50% de las franquicias, pero encontramos algunas tiendas cuya liquidez se dispara hasta valores como 113.15, pudiendo considerarse outliers.
+
+Podemos afirmar que el grado de liquidez está muy concentrado alrededor del 1, y la asimetría es positiva.
+
+Como ya indicamos, la liquidez está relacionada por definición con el endeudamiento.
+
+Aplicamos Spearman, por no seguir una distribución normal:
+
+
+```{r}
+cor_coef2 = cor(practica$endp, practica$liq, method = "spearman")
+plot(practica$endp, practica$liq, xlab = "endp", ylab = "liq")
+text(300, 100, glue::glue ("r = {round (cor_coef2, 2)}"))
+```
+
+
+Hay una correlación negativa significativa entre la liquidez de las franquicias y su nivel de endeudamiento; de cara a crear el modelo de regresión quizá habría que prescindir de una de ellas, ya que podría afectar al nivel de independencia.
+
+
+**_5.- Variable Productividad (Pdtvidad)_** Es un indicador de eficiencia que pone en relación los recursos que se invierten y los resultados obtenidos; Requiere del estudio y análisis de todos los elementos que conforman las franquicias, para saber en qué medida contribuyen a la consecución de los objetivos  marcados y cómo podemos optimizarlos para conseguir un mayor rendimiento de ellos.
+como ratio, la productividad nos permite saber si la empresa está consiguiendo la rentabilidad adecuada.
+
+
+
+```{r}
+summary(practica$Pdtvidad)
+```
+
+
+```{r}
+hist(practica$Pdtvidad, main = "Histograma de Productividad", xlab = "Productividad", ylab = "Frecuencia")
+```
+
+Hay franquicias con productividad negativa, llegando a -1,17. Esta variable presenta asimetría negativa.
+
+
+```{r}
+corr <- 
+dplyr::select(practica, -estp, -GRUPOS_PROVINCIAS)
+```
+
+
+_Correlaciones más significativas de las variables numéricas_
+
+
+```{r}
+correlacion_indep <-round (cor(corr, method = "spearman"), 2)
+correlacion_indep
+```
+
+
+La productividad presenta la mayor correlación positiva con las Ventas (0.49). A mayores, existe correlación positiva significativa entre productividad y cuota de mercado (coe) de las franquicias (0.42).
+
+
+
+
+**_6.- Variable Nº Empleados_** Hace referencia al número de empleados en cada franquicia.
+
+```{r}
+summary(practica$NºEmp)
+```
+
+```{r}
+hist(practica$NºEmp, main = "Histograma de NºEmpleados", xlab = "NºEmp", ylab = "Frecuencia")
+```
+
+
+De media cada tienda cuenta con 7 empleados. Más del 75% tienen menos de 21 empleados.
+
+
+**_7.- Variable Coe_** Hace referencia a la cuota de mercado; a la proporción del mercado que consume los productos y/o servicios de las franquicias.
+Esta variable tiene en cuenta el dato de las Ventas para cada observación / Grupo de provincia a la que pertenece.
+
+Los datos sobre la cuota de mercado indican el tamaño del mercado y la proporción de cada tienda respecto a la competencia. 
+
+
+
+```{r}
+summary(practica$coe)
+```
+
+
+```{r}
+hist(practica$coe, main = "Histograma de cuota de mercado", xlab = "coe", ylab = "Frecuencia")
+```
+
+
+La mayoría de las franquicias concentran su coe entre el 0 y el 0.1. Sigue una distribución asimétrica positiva.
+
+
+
+**_8.- Variable edad_** Tiempo que ha transcurrido desde que se inauguró cada franquicia.
+
+```{r}
+psych::describe(practica$edad)
+```
+
+```{r}
+hist(practica$edad, main = "Histograma de Edad", xlab = "Edad", ylab = "Frecuencia")
+```
+
+
+Se entiende que existen más empresas de nueva creación que de antiguedad superior a 20 años. La media se situa entre 12 años, y el 50 % de las franquicias tienen una antiguedad de entre 5 y 18 años. Presenta asimetría positiva, y curtosis baja (1.05), con respecto a las varibales estudiadas por el momento.
+
+
+
+**_9.- Variable Conce_** Se trata de la competencia que cada franquicia tiene en su zona.
+
+
+```{r}
+summary(practica$conce)
+```
+
+```{r}
+hist(x= practica$conce, main = "Histograma de competencia", xlab = "Competencia", ylab = "Frecuencia")
+```
+
+
+El 50 % tienen entre 4 y 28 entidades que dan el mismo servicio en sus respectivos municipios. Si bien hay valores que se disparan del valor medio, como el valor máximo de 215, a prioi no pueden considerarse valores atípicos, porque corresponden a poblaciones como Madrid y Barcelona, con mayor número de población que las provincias con valores más bajos.
+
+
+
+**_10.- Variable Numac_** nº de accionistas por franquicia.
+
+```{r}
+summary(practica$numac)
+```
+
+```{r}
+hist(x = practica$numac, main = "Histograma de accionistas", xlab = "numac", ylab = "Frecuencia")
+```
+
+
+El 50% de las franquicias tienen hasta 2 accionistas, valor que se aproxima a la media que es de 1.2.
+Aunque se aprecia alguna franquicia que tiene entre 10 y  17, son claras excepciones.
+
+
+**_11.- Variable Numpa_** nº de participados por franquicia.
+
+```{r}
+summary(practica$numpa)
+```
+
+```{r}
+plot(x= practica$numpa, main = "Gráfico de participados", xlab = "Participados", ylab = "Frecuencia")
+```
+
+
+El 75% de las franquicias no presentan ningún participado. La media es muy baja, próxima al 0.
+Con el gráfico se aprecia mejor que existen valores que se disparan, outliers, 20 y 15, y que pueden estar distorsionando la muestra.
+
+
+**_12.- Variable Numest_** Hace referencia al número de establecimientos por empresa.
+
+```{r}
+summary(practica$numest)
+```
+
+En este caso el 50% de los valores se concentran en un número entre el 1 y 2, siendo la media inferior a 2.
+
+
+```{r}
+hist(x= practica$numest, main = "Histograma de establecimientos", xlab = "Establecimientos", ylab = "Frecuencia" )
+```
+
+
+
+**_13.- Variable Estp_** Número de establecimientos en otras provincias.
+
+
+```{r}
+summary(practica$estp)
+```
+
+La mayor parte no tienen establecimientos en otras provincias.
+
+
+```{r}
+plot(practica$estp, main = "Gráfica de establecimientos en otros territorios", 
+     xlab = "estp", ylab = "Frecuencia", 
+     col = c("royalblue", "seagreen"))
+```
+
+
+
+**_14.- Variable Ventas_** Mide el total de las ventas para cada franquicia, entiendo que se trata de un valor anualizado.
+
+```{r}
+summary(practica$VENTAS)
+```
+
+La media arroja un valor de 1592, con bastante distancia al valor máximo que alcanza esta variable (77.055)
+
+En este caso podemos ver como la media es varias veces superior a la mediana. Esto indica presencia de valores atípicos altos.
+
+La mediana es inferior a la media por lo que la distribución de la variable VENTAS para la totalidad de las provincias presenta una asimetría positiva. Los valores no se ajustan a una distribución normal.
+
+La curtosis tiene un valor de 9.1. Es mucho mayor que cero, por lo que la distribución es leptocúrtica (apuntada), con alta concentración de valores entorno a la mediana.
+
+
+```{r}
+hist(practica$VENTAS, main = "Histograma de Ventas", xlab = "Ventas", ylab = "Frecuencia" )
+```
+
+Se observa como las tiendas con mayores volúmenes de ventas están más dispersas.
+
+
+
+__Como ya vimos, las variables no siguen una distribución normal; para seguir con el análisis considero que es preciso normalizar alguna de ellas, mediante logaritmos (no aplicar a valores negativos ni dicotómicas),  y así suaviazar sus distribuciones:__
+
+
+```{r}
+practica_log <- practica |> 
+  mutate(
+    VENTAS = log(VENTAS),
+    liq = log(liq),
+    conce = log(conce),
+    coe = log(coe),
+    numest = log(numest),
+    NºEmp = log(NºEmp),
+  )
+practica_log
+```
+
+Procedo a comprobar nuevamente la normalidad de mis datos:
+
+
+```{r}
+normalidad <- sapply((dplyr::select(practica_log, -GRUPOS_PROVINCIAS, -estp)), shapiro.test)
+normalidad
+
+```
+
+Siguen sin ser normales, pero se aproximan más a una distribución normal.
+
+
+##### Una vez vistas las variables de forma individual, vamos a analizar las correlaciones más significativas de las variables numéricas:
+
+
+
+Aplicamos la correlación de Spearman ya que queremos medir la relación entre variables y no se cumple el supuesto de normalidad.
+
+
+```{r}
+corr <- 
+dplyr::select(practica_log, -estp, -GRUPOS_PROVINCIAS)
+```
+
+
+
+```{r}
+correlacion_indep <-round (cor(corr, method = "spearman"), 2)
+correlacion_indep
+```
+
+
+
+
+```{r}
+corPlot(correlacion_indep, cex = 0.90, main = "Matriz de correlación")
+```
+
+
+* Como ya indicamos,:
+    + Existe correlación positiva entre rentabieco y rentabifin (0.36)
+    + la productividad presenta la mayor correlación positiva con las Ventas (0.49) Hay correlación positiva significativa entre productividad y cuota de mercado (coe) de las franquicias.
+    
+* A mayores:
+    + Entre el endeudamiento de las franquicias (Endp) y la liquidez de las mismas, existe una correlación negativa significativa, del -0.66; Habrá que tenerlo en cuenta a la hora de realizar nuestro modelo de regresión, puesto que influye en el nivel de independencia entre esas variables.
+    
+
+
+```{r}
+cor_coef3 = cor(practica$endp, practica$liq, method = "spearman")
+plot(x = practica$endp, y = practica$liq, main = "Endeudamiento - Liquidez", xlab = "endp", ylab = "liq", pch = 1, col = c("blue", "red"))
+text(300, 100, glue::glue ("r = {round (cor_coef3, 2)}"))
+```
+
+
+
+
+   + Se observa correlación negativa del -0.5 entre Endp y rentabieco. En caso de tener que prescindir de una de ellas para el modelo de regresión, debería elegirse la que a su vez esté más correlacionada con la variable de ventas.
+    
+    
+```{r}
+cor_coef4 =cor(practica$rentabieco, practica$endp, method = "spearman")
+plot(x = practica$rentabieco, y = practica$endp, main = "Rentabieco - Endeudamiento", xlab = "rentabieco", ylab = "endp", pch = 1, col = c("grey", "red"))
+text(-150, 50, glue::glue ("r = {round (cor_coef4, 2)}"))
+```
+
+
+  + Correlación positiva del 0.49 entre Ventas y Productividad. Se traduce en que el área de ventas es eficiente.
+(Lo vemos en el punto 2).
+
+
+  + Se observa correlación negativa de -0.42 entre la edad y el endeudamiento de las tiendas. Es comprensible, que a mayor antiguedad de la franquicia, menor sea su endeudamiento.
+    
+
+```{r}
+cor_coef5 = cor(practica$edad, practica$endp, method = "spearman")
+plot(x = practica$edad, y = practica$endp, main = "Edad & Endeudamiento", xlab = "edad", ylab = "endeudamiento", pch = 1, col = c("orange", "darkgreen"))
+text(40, 400, glue::glue ("r = {round (cor_coef5, 2)}"))
+```
+
+    
+  + El coe correlaciona de manera positiva y significativa con ventas (0.84) y NºEmp (0.7).
+    A su vez, presenta correlación positiva de 0.42 entre la cuota de mercado (coe) y la Productividad, como ya indicamos.
+
+      También presenta correlación positiva significativa de 0.48 la cuota de mercado (coe) y el nº de accionistas (numac).
+      
+      
+```{r}
+cor_coef6 = cor(practica$numac, practica$coe, method = "spearman")
+plot(x = practica$numac, y = practica$coe, main = "numac & cuota de mercado", xlab = "numac", ylab = "coe", pch = 1, col = c("brown", "steelblue"))
+text(100000, -100, glue::glue ("r = {round (cor_coef6, 2)}"))
+```
+
+      
+    + VENTAS : Lo veremos en profundidaz en el apartado 2.
+
+
+
+
+#####  **2.	Análisis del Comportamiento de las Ventas y Variables que le Afectan.**
+
+
+La mayor correlación se da entre las Ventas y el número de empleados, ventas y coe (cuota de mercado), y las ventas y el numest (nº de establecimientos).
+
+
+Lo primero que haremos será  estudiar las correlaciones entre las variables numéricas; según vimos en el primer apartado, al aplicar sobre nuestros datos numéricos el test de Shapiro no seguían una distribución normal, por lo que aplicaremos la correlación de Spearman:
+
+_— Ventas y rentabieco:_
+
+
+```{r}
+cor_coef7 = cor(practica$rentabieco,practica$VENTAS, method = "spearman")
+plot(x = practica$rentabieco, y = practica$VENTAS, main = "Ventas & rentabieco", xlab = "rentabieco", ylab = "Ventas", pch = 1, col = c("orange", "green"))
+text(-150, 60000, glue::glue ("r = {round (cor_coef7, 2)}"))
+```
+
+
+Se observa una correlación positiva y débil entre ambas variables.
+
+
+
+
+_— Ventas y rentabifin:_
+
+
+```{r}
+cor_coef8 = cor(practica$rentabifin,practica$VENTAS, method = "spearman")
+plot(x = practica$rentabifin, y = practica$VENTAS, main = "Ventas & rentabifin", xlab = "rentabifin", ylab = "Ventas", pch = 1, col = c("orange", "darkgreen"))
+text(-400, 60000, glue::glue ("r = {round (cor_coef8, 2)}"))
+```
+
+
+Hay una correlación negativa muy débil y significativa entre ventas y rentabilidad financiera.
+
+Ya habíamos observado  que existía correlación entre rentabilidad económica y financiera en el apartado 1, y puesto que la correlación entre ventas y rentabilidades alcanza mayor valor para ventas y rentabieco, podremos prescindir de la rentabifin para nuestro modelo de predicción.
+
+
+
+_— Ventas y endp:_
+
+```{r}
+cor_coef9 = cor(practica$endp, practica$VENTAS, method = "spearman")
+plot(x = practica$endp, y = practica$VENTAS, main = "Ventas & Endeudamiento", xlab = "endp", ylab = "Ventas", pch = 1, col = c("orange", "darkblue"))
+text(400, 60000, glue::glue ("r = {round (cor_coef9, 2)}"))
+```
+
+
+
+Correlación negativa y significativa entre ventas y endeudamiento de las tiendas.
+
+
+
+_— Ventas y liq:_
+
+
+```{r}
+cor_coef11 = cor(practica$liq,practica$VENTAS, method = "spearman")
+plot(x = practica$liq, y = practica$VENTAS, main = "Ventas & Liquidez", xlab = "liq", ylab = "Ventas", pch = 1, col = c("orange", "purple"))
+text(100, 70000, glue::glue ("r = {round (cor_coef11, 2)}"))
+```
+
+
+
+
+Hay una correlación positiva significativa, entre ventas y liquidez.
+Atendiendo a lo ya explicado, y dado que el endeudamiento está más correlacionado con las ventas que la liquidez, parece adecuado prescindir de la liquidez.
+
+
+
+_— Ventas y Pdtividad:_
+
+
+```{r}
+cor_coef10 = cor(practica$Pdtvidad,practica$VENTAS, method = "spearman")
+plot(x = practica$Pdtvidad, y = practica$VENTAS, main = "Ventas & Productividad", xlab = "Pdtvidad", ylab = "Ventas", pch = 1, col = c("orange", "darkred"))
+text(250, 60000, glue::glue ("r = {round (cor_coef10, 2)}"))
+```
+
+
+
+Hay una correlación positiva y significativa entre las ventas y la productividad. 
+Considero la productividad como variable relevante para mi modelo de predicción.
+
+
+
+_— Ventas y NºEmpleados:_
+
+```{r}
+cor_coef12 = cor(practica$NºEmp,practica$VENTAS, method = "spearman")
+plot(x = practica$NºEmp, y = practica$VENTAS, main = "Ventas & Nº Empleados", xlab = "NºEmp", ylab = "Ventas", pch = 1, col = c("orange", "darkgrey"))
+text(10, 70000, glue::glue ("r = {round (cor_coef12, 2)}"))
+```
+
+
+
+
+Existe correlación positiva y significativa entre ventas y Nº de empleados; considero que puede ser una variable significativa a la hora de confeccionar mi modelo de predicción.
+
+
+
+_— Ventas y coe:_
+
+```{r}
+cor_coef13 = cor(practica$coe,practica$VENTAS, method = "spearman")
+plot(x = practica$coe, y = practica$VENTAS, main = "Ventas & coe", xlab = "coe", ylab = "Ventas", pch = 1, col = c("orange", "brown"))
+text(0.4, 60000, glue::glue ("r = {round (cor_coef13, 2)}"))
+```
+
+
+Con una correlación positiva del 0.84 entre ventas y cuota de mercado, esta variable se tendría que tener en cuenta en el modelo de predicción; Es significativa y permite la determinación espacial.
+Lleva implícita las ventas, y habrá que ver si teníendola en cuenta puede distorsionar el modelo.
+
+
+
+_— Ventas y edad:_
+
+
+```{r}
+cor_coef14 = cor(practica$edad,practica$VENTAS, method = "spearman")
+plot(x = practica$edad, y = practica$VENTAS, main = "Ventas & edad", xlab = "edad", ylab = "Ventas", pch = 1, col = c("orange", "magenta"))
+text(5, 70000, glue::glue ("r = {round (cor_coef14, 2)}"))
+```
+
+
+Hay correlación postiva y significativa entre ventas y  antiguedad de las tiendas.
+Veremos qué ocurre al introducir esta variable en el modelo de regresión.
+
+
+
+_— Ventas y conce:_
+
+
+```{r}
+cor_coef15 = cor(practica$conce,practica$VENTAS, method = "spearman")
+plot(x = practica$conce, y = practica$VENTAS, main = "Ventas & conce", xlab = "conce", ylab = "Ventas", pch = 1, col = c("orange", "turquoise"))
+text(175, 60000, glue::glue ("r = {round (cor_coef15, 2)}"))
+```
+
+
+Correlación positiva débil pero significativa entre ventas y conce.
+Se suele pensar que a menor competencia más se incrementarían las ventas de las tiendas, y en este caso no ocurre así, puesto que la correlación arroja un valor no muy alto (0.26).
+
+
+
+_— Ventas y numac:_
+
+
+```{r}
+cor_coef16 = cor(practica$numac,practica$VENTAS, method = "spearman")
+plot(x = practica$numac, y = practica$VENTAS, main = "Ventas & numac", xlab = "numac", ylab = "Ventas", pch = 1, col = c("orange", "plum"))
+text(15, 60000, glue::glue ("r = {round (cor_coef16, 2)}"))
+```
+
+
+Se observa correlación positiva y significativa entre las ventas y el nº de accionistas de las tiendas, con un valor de 0.54
+
+
+
+_— Ventas y numpa:_
+
+```{r}
+cor_coef17 = cor(practica$numpa,practica$VENTAS, method = "spearman")
+plot(x = practica$numpa, y = practica$VENTAS, main = "Ventas & numpa", xlab = "numpa", ylab = "Ventas", pch = 1, col = c("orange", "tan"))
+text(15, 70000, glue::glue ("r = {round (cor_coef17, 2)}"))
+```
+
+
+Hay correlación positiva débil y significativa entre ventas y el nº de participados. 
+Como la correlación entre ventas y el numac es mayor que entre ventas y numpa, puede pensarse que se podría prescindir de numpa para nuestro modelo predictivo.
+
+
+_— Ventas y numest:_
+
+
+```{r}
+cor_coef18 = cor(practica$numest,practica$VENTAS, method = "spearman")
+plot(x = practica$numest, y = practica$VENTAS, main = "Ventas & numest", xlab = "numest", ylab = "Ventas", pch = 1, col = c("orange", "black"))
+text(30, 70000, glue::glue ("r = {round (cor_coef18, 2)}"))
+```
+
+
+
+Hay correlación positiva y significativa entre ventas y el nº de establecimientos por empresa con un valor de  correlación  de 0.43.
+
+
+
+__Continuamos nuestro análisis con las variables categóricas:__
+
+
+
+_— Ventas y Estp:_
+
+```{r}
+wilcox.test(VENTAS ~ estp, practica)
+```
+
+
+```{r}
+ggplot(practica, aes(estp, VENTAS, fill = estp)) +
+  geom_boxplot(outlier.colour = "blue") +   
+  labs(x="Establecimientos otras provincias", y="ventas", fill="estp")
+```
+
+
+
+
+
+El gráfico refleja que las franquicias con tiendas fuera de sus provincias, vende más.
+Ahora bien, como vimos, el número de franquicias con tiendas fuera de sus provincias es muy bajo, por lo que puede nos ser una variable reseñable a la hora de confeccionar nuestra predicción.
+
+
+
+_— Ventas y Grupos Provincias:_
+
+```{r}
+kruskal.test(VENTAS ~ GRUPOS_PROVINCIAS, practica)
+```
+
+```{r}
+kruskal.test(VENTAS ~ PROVINCIA, datosPractica)
+```
+
+```{r, fig.width=12, fig.height=5}
+ggplot(practica, aes(GRUPOS_PROVINCIAS, VENTAS, fill = GRUPOS_PROVINCIAS)) +
+  geom_boxplot(outlier.colour = "blue") +
+  labs(x="Grupos Provincias", y="ventas", fill="GRUPOS_PROVINCIAS")
+```
+
+Es apreciable la cantidad importante de outliers en la muestra, si bien entiendo eliminarlos no seria buena opción, puesto que reduciría demasiado el tamaño de la muestra. 
+
+Si tuviésemos en cuenta los datos iniciales por Provincias, y según datos del test, no existiría diferencias significativas entre las ventas y las provincias donde se encuentren las franquicias.
+
+Ahora bien, según la agrupación que hicimos por tamaño de provincias, podemos observar que las ventas no experimentan una subida significativa para los grupos de provincias con mayor número de habitantes, es más, grupos como el de Madrid se asemeja mucho a los grupos 3 y 4 en ventas.
+
+
+
+
+
+#####  **3.	Realizar una tabla de contingencia entre Ventas y Número de empleados, una vez categorizadas ambas variables, para número de empleados, por ejemplo, la utilizada a nivel Europeo, la cual divide a las empresas en Microempresas (1-9 trabajadores), Pequeña empresa (10-49 trabajadores), Mediana empresa (50-249 trabajadores) y Gran empresa (250 y más trabajadores)).**
+
+
+**__Categorizamos la varible VENTAS:__**
+
+Para ello considero como valores de corte el dato de los cuartiles y mediana de las ventas.
+
+```{r}
+summary(practica$VENTAS)
+```
+
+
+```{r}
+Ventas <- cut(practica$VENTAS, breaks = c(0, 495, 1593, 7820, Inf), labels = c("Ventas Bajas", "Ventas Medias", "Ventas Medias-Altas", "Ventas Altas"))
+summary(Ventas)
+```
+
+**__Categorizamos la varible Nº de Empleados:__**
+
+
+No categorizo por Gran Empresa al no tener valores para esta categoría.
+
+```{r}
+Tamaño <- cut(practica$NºEmp, breaks = c(0, 9, 49, 249), labels = c("Microempresas", "Pequeña Empresa", "Mediana Empresa"))
+summary(Tamaño)
+```
+
+Nótese que no existen grandes empresas en el estudio.
+
+
+**__Realizamos la tabla de contingencia:__**
+
+
+```{r}
+Ventas_Tamaño <- table(Ventas, Tamaño)
+round(prop.table(Ventas_Tamaño) * 100,2)
+```
+
+
+
+Las ventas más altas se producen en las franquicias con 19-49 empleados. Por el contrario, las ventas más bajas, en las tiendas con menos de 9 trabajadores.
+
+
+```{r}
+gmodels::CrossTable(Ventas, Tamaño, chisq.test = T)
+```
+
+Aquí se muestran las frecuencias absolutas (conteo) y relativas (%) para la relación entre las Ventas y el número de empleados. 
+
+Se aprecia que la distribución no es homogénea. Hay alta concentración de microempresas con ventas reducidas.
+
+No hay independencia entre las ventas y el tamaño de las tiendas. Se reafirma la relación positiva entre el tamaño de las franquicias y su nivel de ventas.
+
+
+```{r}
+chisq.test(Ventas_Tamaño)
+```
+
+Con un nivel de significación de 0.05, podemos rechazar la hipótesis nula, luego consideraremos que  hay dependencia entre ambas variables, es decir, el tamaño de empresa está asociado a las Ventas, con un nivel de confianza del 95%.
+
+
+```{r}
+barplot(Ventas_Tamaño,
+        main = "Ventas según el tamaño de la empresa",
+        xlab="Tamaño de la empresa", ylab="Ventas",
+        col = c("coral", "darkblue", "cyan3", "purple"),
+        legend.text = rownames(Ventas_Tamaño),
+        beside = FALSE)
+```
+
+
+
+
+#####  **4.	Comparar las ventas entre Madrid y Barcelona.** 
+
+
+Primero veamos si las ventas se comportan de forma distinta entre Madrid y Barcelona.
+
+
+```{r}
+datos_Madrid <- 
+  filter( practica, GRUPOS_PROVINCIAS == "GRUPO-6- Madrid")
+```
+
+```{r}
+datosVentas_Madrid <- datos_Madrid |>
+  dplyr::select(-c(rentabieco, rentabifin, endp,liq, Pdtvidad, NºEmp, coe, edad, conce, numac, numpa, numest, estp, GRUPOS_PROVINCIAS))
+summary(datosVentas_Madrid)
+```
+
+
+
+```{r}
+datos_Barcelona <-
+  filter(practica,GRUPOS_PROVINCIAS == "GRUPO-5- Barcelona")
+```
+
+
+
+
+```{r}
+datosVentas_Barcelona <- datos_Barcelona |>
+  dplyr::select(-c(rentabieco, rentabifin, endp,liq, Pdtvidad, NºEmp, coe, edad, conce, numac, numpa, numest, estp, GRUPOS_PROVINCIAS))
+summary(datosVentas_Barcelona)
+```
+
+
+Se aprecia concentración por debajo de la mediana. El 50% de las tiendas de Madrid tienen ventas por debajo de 1827. En el caso de Barcelona este dato es de 1855.
+
+La media de ventas en Madrid es superior a la de Barcelona, pero este dato no resulta representativo debido a los valores extremos superiores. El 50% de las tiendas de Madrid tienen ventas por debajo de 1827. En el caso de Barcelona este dato es 1855.
+
+
+
+– Realizamos un contraste de hipótesis para analizar si las ventas en Madrid y Barcelona se comportan de manera similar. Revisamos la normalidad de sus distribuciones:
+
+
+
+```{r}
+shapiro.test(datos_Madrid$VENTAS)
+```
+
+```{r}
+shapiro.test(datos_Barcelona$VENTAS)
+```
+
+En ambos casos el p-valor es < 0.05, por lo que no siguien distribuciones normales.
+
+Realizamos el test de Wilcoxon:
+
+```{r}
+Ventas_Madrid_Barcelona <- practica [(practica$GRUPOS_PROVINCIAS == "GRUPO-6- Madrid") | (practica$GRUPOS_PROVINCIAS == "GRUPO-5- Barcelona"), ]
+wilcox.test(VENTAS~GRUPOS_PROVINCIAS, Ventas_Madrid_Barcelona)
+```
+
+Atendiendo a los resultados del test, con un p-valor > 0.05, que las ventas en Madrid y Barcelona se comportan de manera similar.
+
+
+En el siguiente diagrama de cajas puede verse como la media no es representativa en ninguno de los dos grupos. Se ve aumentada por el gran número de valores atípicos.
+
+```{r}
+box_ventasMB <- ggplot(data = Ventas_Madrid_Barcelona, aes(x=GRUPOS_PROVINCIAS, y=VENTAS))
+box_ventasMB+geom_boxplot(aes(fill=GRUPOS_PROVINCIAS))+
+  ylab("VENTAS")+ggtitle("Distribución de las ventas entre MADRID vs BARCELONA")+
+  stat_summary(fun.y=mean, geom="point", shape=5, size=4)
+```
+
+
+
+
+Las ventas de Madrid y Barcelona, aunque siguen una similar distribución, sí muestran una diferencia significativa una vez se indaga más sobre ellos. Ya en el gráfico destacan tres outliers con un altísimo volumen de ventas en Madrid, por encima de 70.000. Aunque el bigote superior de Barcelona se sitúa por encima del de Madrid, los percentiles intercuantílicos siguen siendo muy similares.
+
+Si tenemos en cuenta las ventas totales, Barcelona  ha vendido un total de 331439 más que  Madrid, si bien, Barcelona cuenta con 73 franquicias más que Madrid.
+
+
+Entiendo que la significancia no se debe solamente a los outliers:
+
+
+
+
+```{r}
+outMadrid <- boxplot.stats(datos_Madrid$VENTAS)
+outMadrid
+```
+
+```{r}
+boxplot.stats(datos_Barcelona$VENTAS)
+```
+
+
+
+
+```{r}
+par(mfrow=c(2,2))
+outMadrid <- datosVentas_Madrid  |>  filter(VENTAS < 21698)
+boxplot(outMadrid, main = "Madrid")
+outBarcelona <- datosVentas_Barcelona  |>  filter(VENTAS < 23796)
+boxplot(outBarcelona, main = "Barcelona")
+```
+
+Aunque no consideremos esos valoes, los resultado siguen siendo unas distribuciones asimétricas positivas, con características similares en Madrid y Barcelona. En cualquier caso, se entiende que la eliminación de los outliers no procede, puesto que disminuiría  demasiado el tamaño de la muestra.
+
+
+
+
+#####  **5.	Presentación del modelo de predicción de las ventas para el siguiente año y describirla adecuadamente.**
+
+
+
+En primer lugar voy a realizar el modelo teniendo en cuenta todas las variables, para ver los valores que arroja:
+
+
+```{r}
+full.model <- lm(VENTAS ~ ., practica)
+summary(full.model)
+```
+
+El modelo con todas las variables introducidas como predictores tiene un R-squared de 0.82, es capaz de explicar el 82% de la variabilidad observada en las Ventas. 
+Se aprecia como algunas de las variables no son significativas, por lo que no contribuyen al modelo.
+
+
+
+__Mediante el stepAIC veremos el mejor subset para el total de variables:__
+
+
+
+```{r}
+step.model <- stepAIC (full.model, direction = "both", trace = FALSE)
+summary(step.model)
+```
+
+    + El mejor modelo resultante del proceso de selección ha sido:
+      VENTAS ~ rentabieco + endp + Pdtvidad + NºEmp + 
+      coe + edad + conce + numpa + numest + GRUPOS_PROVINCIAS
+    
+con un R-squared del 0.82.
+
+
+__Mi modelo de predicción:__
+__MODELO 1:__
+
+En principio las ventas tienen que ver con factores de actividad, con el número de establecimientos y con el empleo.
+
+
+Ajustamos la regresión, prescindiendo de aquellas variables que son menos significativas, y a mayores prescinciendo de algunas mas que vimos que podian interferir en el modedo de predicción según las correlaciones vistas entre las variables;
+
+No tenemos en cuenta las agrupaciones de provincias, puesto que ya vimos que no se observaba una influencia en las ventas.
+
+He tenido en cuenta aquellas variables independientes más correlacionadas con las Ventas pero sin que estén correlacionadas entre sí: Nº de empleados, Productividad, coe, rentabieco.
+
+No he tenido en cuenta aquellas variables que, como ya vimos, correlacionaban mucho entre si: 
+  * el nivel de endeudamiento (endp) y la liquidez(liq)
+  * el nº de participados (numpa), correlacionaba con nº de empleados
+  * el nº de establecimientos por empresa (numest), correlacionaba con nº de empleados.
+  * el nº de accionistas (numac), correlacionaba con nº de empleados y coe.
+  * la edad de las franquicias, correlacionaba con el nº de empleados y coe.
+
+
+Tengo en cuenta la bbdd con los valores que he normalizado (practica_log):
+
+
+```{r}
+modelo1 <- (lm (VENTAS ~ Pdtvidad + rentabieco + coe + numest + NºEmp, practica_log))
+summary(modelo1)
+```
+
+
+
+De lo analizado podemos concluir que:
+
+  + El modelo con las 5 variables introducidas como predictores es capaz de explicar el 86.44% de la varianza observada en las Ventas (R² ajustado = 0,8643).
+
+  +  El estadístico F general del modelo es 5606 y el p-value del modelo es significativo (2.2e-16), por lo que podemos decir que el modelo es útil y que existe una relación entre los predictores y la variable Ventas (al menos uno de los coeficientes es distinto a 0).
+
+  + Los 5 predictores que hemos seleccionado parecen tener una relación estadísticamente significativa con la ventas.
+
+
+
+
+Mostramos el intervalo de confianza para cada uno de los coeficientes parciales de regresión:
+
+```{r}
+confint(modelo1)
+```
+
+Con un nivel de confiazza del 95%, por cada unidad que aumenta  cada predictor, las Ventas varían en promedio tantas unidades como indica la pendiente.
+
+En este caso, por cada unidad que aumenta el predictor productividad, por ejemplo, las ventas aumentan en promedio 0.7606, manteniéndose constantes el resto de predictores. Con una confianza del 95%, la pendiente se encuentra entre 0.020 y 0.022.
+
+
+
+__Verificamos los supuestos de lo residuos:__ 
+
+
+__Comprobamos la multicolinealidad de nuestro modelo 1.__
+
+Debemos revisar la correlación entre las variables independientes.
+Realizamos el estadístico VIF.
+
+```{r}
+car::vif(modelo1)
+```
+Al ser valores < 5 nuestro modelo no presenta  multicolinealidad.
+
+
+__Comprobamos la _normalidad de los residuos_ en nuestro modelo 1.__
+
+
+Los residuos deben distribuirse de forma normal.
+
+```{r}
+shapiro.test(modelo1$residuals)
+```
+
+La falta de normalidad tiene poca influencia si el número de datos es suficientemente grande (TCL).
+
+
+__Comprobamos la homocedasticidad  de los residuos_ en nuestro modelo 1.__
+
+La homocedasticidad se detecta cuando la varianza de los residuos es constante.
+Cuanto mas constante y pequeña sea una varianza el modelo de predicción será más fiable.
+
+
+```{r}
+bptest(modelo1)
+```
+
+Dado que el valor p-valor es menor que 0.05, rechazamos la Ho.
+No existe homocedasticidad; en este caso los errores estándar que se muestran en la tabla de salida de la regresión pueden no ser confiables.
+
+
+
+```{r}
+par(mfrow = c(2, 2))
+plot(modelo1)
+```
+
+
+
+Revisando los datos y las gráficas podemos concluir que:
+
+  + Los residuos no se distribuyen de forma homogénea en torno a 0. El test de Breusch-Pagan también proporciona evidencias de falta de homocedasticidad (p-valor =  2.2e-16).
+
+  + El Q-Q plot refleja que hay indicios de falta de normalidad en los residuos (aquellos de mayor valor), corroborado también por el test de hipótesis de Shapiro Wilk (p-valor =  2.2e-16).
+
+  + Existen observaciones con influencia.
+
+
+  + Las variables que incluye el modelo no están  correlacionadas.
+
+
+  + Este modelo 1 puede explicar con un 86% la variabilidad en las ventas, el test F muestra que es significativo; ahora bien, atendiendo al estudio de los residuos,  puede presentar inconsistencias al no cumplir con los 3 requisitos para los residuos).
+
+
+  + En este modelo 1: el parámetro sería en qué % varían las Ventas(log) cuando se incrementa el un 1% el NºEmp (log). O en qué % varían las Ventas (log), cuando varía en 1 unidad la Pdtvidad.
+
+
+      $$modelo 1 : Ventas = 7.6429455 + 0.0214418Pdtvidad + 0.0036045rentabieco + 0.3388772coe +  0.1931451numest +         0.7606392NºEmp$$
+
+
+
+Veamos si modificando o prescindiendo de alguna de las variables independientes conseguir solventar esa debilidad de nuestro modelo 1.
+
+
+__MODELO 2:__
+
+Veamos si prescindiendo de la rentabilidad económica, que vimos en el modelo entero que  tenia menos significancia y del nº de establecimientos, que correlacionan con las Ventas y el nº de empleados, podemos obtener un modelo que solvente las debilidades del modelo 1 en cuanto a los residuos:
+
+
+```{r}
+modelo2 <- (lm (VENTAS ~ NºEmp + Pdtvidad + coe, practica_log))
+summary(modelo2)
+```
+
+De lo analizado podemos concluir que:
+
+  + El modelo con las 3 variables introducidas como predictores es capaz de explicar el 86.13% de la varianza observada en las Ventas (R² ajustado = 0,8612).
+
+  +  El estadístico F general del modelo es 9104 y el p-value del modelo es significativo (2.2e-16), por lo que podemos decir que el modelo es útil y que existe una relación entre los predictores y la variable Ventas (al menos uno de los coeficientes es distinto a 0).
+
+  + Los 3 predictores que hemos seleccionado parecen tener una relación estadísticamente significativa con la ventas.
+
+
+
+
+Mostramos el intervalo de confianza para cada uno de los coeficientes parciales de regresión:
+
+```{r}
+confint(modelo2)
+```
+
+Con un nivel de confiazza del 95%, por cada unidad que aumenta  cada predictor, las Ventas varían en promedio tantas unidades como indica la pendiente.
+
+En este caso, por cada 1% que aumenta el predictor NºEmp, por ejemplo, las ventas aumentan en promedio 0.7983 %, manteniéndose constantes el resto de predictores. Con una confianza del 95%, la pendiente se encuentra entre 0.775 y 0.821. Poco probable que el verdadero valor sea 0.
+
+
+
+
+__Verificamos los supuestos de lo residuos:__ 
+
+
+__Comprobamos la multicolinealidad de nuestro modelo 2.__
+
+Debemos revisar la correlación entre las variables independientes.
+Realizamos el estadístico VIF.
+
+```{r}
+car::vif(modelo2)
+```
+
+Al ser valores < 5 nuestro modelo no presenta  multicolinealidad.
+
+
+__Comprobamos la _normalidad de los residuos_ en nuestro modelo 2.__
+
+
+Los residuos deben distribuirse de forma normal.
+
+```{r}
+shapiro.test(modelo2$residuals)
+```
+
+
+Al igual que en el modelo 1, el modelo 2 presenta ausencia de normalidad; nos apoyaremos nuevamente en la TCL.
+
+
+__Comprobamos la homocedasticidad  de los residuos_ en nuestro modelo 2.__
+
+
+
+```{r}
+bptest(modelo2)
+```
+
+Dado que el valor p-valor es menor que 0.05, rechazamos la Ho.
+No existe homocedasticidad.
+
+
+
+```{r}
+par(mfrow = c(2, 2))
+plot(modelo2)
+```
+
+
+
+
+Revisando los datos y las gráficas podemos concluir que:
+
+  + Los residuos no se distribuyen de forma homogénea en torno a 0. El test de Breusch-Pagan también proporciona evidencias de falta de homocedasticidad (p-valor =  2.2e-16).
+
+  + El Q-Q plot refleja que hay indicios de falta de normalidad en los residuos (aquellos de mayor valor), corroborado también por el test de hipótesis de Shapiro Wilk (p-valor =  2.2e-16).
+
+  + Existen observaciones con influencia.
+
+
+  + Las variables que incluye el modelo no están  correlacionadas.
+
+
+  + Este modelo 2 puede explicar con un 86% la variabilidad en las ventas, el test F muestra que es significativo; ahora bien, atendiendo al estudio de los residuos,  puede presentar inconsistencias al no cumplir con los 3 requisitos para los residuos.
+
+
+
+      $$modelo 2 : Ventas = 7.6429455 + 0.7983793NºEmp + 0.0218888Pdtvidad + 0.3431296coe$$
+
+
+
+
+
+Este modelo 2 puede explicar con un 86% la variabilidad en las ventas, el test F muestra que es significativo; a
+Al igual que con el modelo 1, puede verse afectado por los residuos.
+
+Con respecto al modelo con todas las variables, tanto el modelo 1 como el modelo 2 han incrementado el R² ajustado.
+
+
+
+Ambos modelos pueden explicar con un 86% la variabilidad en las ventas, no existen grandes diferencias entre ellos, si bien el modelo 2 alcanza el mismo valor de explicación con menos variables independientes (3 vs 5), lo que lo hace más sencillo; el RMSE para ambos es similar ( 0.6609 con df4397 vs 0.6684 df4399).
+
+
+Considero quedarme con el **modelo 2**, por lo arriba expuesto. Ahora bien, habría que obtener más información sobre los valores de influencia para saber si se podrían realmente prescindir de ellos y si así se conseguiría mayor consistencia en los residuos y conseguir un modelo más robusto para predecir las Ventas.
+
+
+
+
